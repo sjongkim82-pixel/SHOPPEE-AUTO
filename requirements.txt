@@ -1,6 +1,5 @@
 streamlit
 pandas
-Pillow
-requests
+selenium
+webdriver-manager
 beautifulsoup4
-google-generativeai
