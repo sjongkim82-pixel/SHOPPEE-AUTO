@@ -1,67 +1,81 @@
 import streamlit as st
-import cloudscraper
-from bs4 import BeautifulSoup
+import pandas as pd
+from googlesearch import search
 import re
 
-def scrape_fast(url):
-    """차단 방지 레이어를 입힌 초간단 수집기"""
+# 페이지 설정
+st.set_page_config(page_title="Shopee Sourcing Master", layout="wide")
+
+def scrape_via_google(url):
+    """쇼핑몰 직접 접속 대신 구글 검색 데이터를 활용"""
     try:
-        # 브라우저처럼 보이게 해주는 스크래퍼 생성
-        scraper = cloudscraper.create_scraper()
-        res = scraper.get(url, timeout=10)
+        # 구글에서 해당 URL을 검색 (최상단 결과 1개만 가져옴)
+        query = f"info:{url}"
+        results = list(search(query, num_results=1, advanced=True))
         
-        if res.status_code != 200:
-            return {"title": f"접속 실패 ({res.status_code})", "price": "0", "img_url": ""}
-        
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        # 1. 제목 (og:title 최우선)
-        title = "제목 없음"
-        og_title = soup.find("meta", property="og:title")
-        if og_title:
-            title = og_title['content']
+        if results:
+            res = results[0]
+            # 구글 검색 결과의 제목 (쇼핑몰이 설정한 상품명)
+            title = res.title.split(":")[0].replace(" - 네이버 스마트스토어", "").strip()
+            
+            # 설명글(Snippet)에서 가격 패턴(숫자+원) 추출 시도
+            description = res.description
+            price = "0"
+            price_match = re.search(r'([\d,]+)원', description)
+            if price_match:
+                price = price_match.group(1).replace(",", "")
+            
+            return {
+                "title": title,
+                "price": price,
+                "description": description
+            }
         else:
-            title = soup.title.string if soup.title else "제목 없음"
-            
-        # 2. 가격 (숫자 패턴)
-        price = "0"
-        price_match = re.search(r'(\d{1,3}(?:,\d{3})+)', res.text)
-        if price_match:
-            price = price_match.group(1).replace(",", "")
-
-        # 3. 이미지
-        img_url = ""
-        og_img = soup.find("meta", property="og:image")
-        if og_img:
-            img_url = og_img['content']
-
-        return {"title": title, "price": price, "img_url": img_url}
+            return None
     except Exception as e:
-        return {"title": f"오류 발생: {str(e)}", "price": "0", "img_url": ""}
+        st.error(f"우회 시도 중 오류: {e}")
+        return None
 
-# --- UI ---
-st.set_page_config(page_title="Shopee Sourcing", layout="wide")
-st.title("🛡️ 3초 완성 상품 수집기")
+# --- UI 레이아웃 ---
+st.title("🛡️ Shopee Sourcing (Google Cache Mode)")
+st.info("쇼핑몰의 직접 차단을 피해 구글 검색 엔진 데이터로 정보를 읽어옵니다.")
 
-url_input = st.text_input("수집할 상품 URL (네이버, 쿠팡 등)")
+url_input = st.text_input("수집할 상품 URL을 입력하세요 (네이버, 쿠팡, 다이소 등)")
 
-if st.button("🚀 정보 가져오기"):
+if st.button("🚀 데이터 수집 시작"):
     if url_input:
-        with st.spinner("정보를 읽어오는 중입니다..."):
-            data = scrape_fast(url_input)
+        with st.spinner("구글 서버에서 정보를 안전하게 가져오는 중..."):
+            data = scrape_via_google(url_input)
             
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                if data['img_url'] and "http" in data['img_url']:
-                    st.image(data['img_url'], use_container_width=True)
-            with col2:
-                st.subheader("✅ 수집 결과")
-                st.write(f"**상품명:** {data['title']}")
-                st.write(f"**한국 원가:** {data['price']}원")
+            if data:
+                st.success("정보 수집 성공!")
+                col1, col2 = st.columns(2)
                 
-                # 쇼피 싱가포르 가격 (마진 30%, 환율 1000원 기준)
-                if data['price'].isdigit():
-                    sgd = round((int(data['price']) * 1.3) / 1000, 2)
-                    st.metric("🇸🇬 쇼피 예상 판매가", f"${sgd} SGD")
+                with col1:
+                    st.subheader("✅ 수집 결과")
+                    final_title = st.text_input("수정된 상품명", data['title'])
+                    
+                    # 가격이 0으로 나올 경우 직접 입력 유도
+                    current_price = int(data['price']) if data['price'].isdigit() else 0
+                    final_price = st.number_input("한국 원가(KRW)", value=current_price, step=1000)
+                
+                with col2:
+                    st.subheader("🇸🇬 쇼피 판매가 계산")
+                    # 마진 35% + 환율 1000원 가정 (필요시 수정 가능)
+                    sgd_price = round((final_price * 1.35) / 1000, 2)
+                    st.metric("권장 판매가", f"${sgd_price} SGD")
+                    
+                # 엑셀 저장용 데이터 구성
+                st.divider()
+                st.subheader("📊 엑셀 등록용 데이터 미리보기")
+                res_df = pd.DataFrame([{
+                    "Original Title": data['title'],
+                    "Price (KRW)": final_price,
+                    "Price (SGD)": sgd_price,
+                    "URL": url_input
+                }])
+                st.table(res_df)
+            else:
+                st.error("구글 검색 결과에서 정보를 찾지 못했습니다. URL이 정확한지 확인해 주세요.")
     else:
-        st.warning("URL을 입력해 주세요.")
+        st.warning("URL을 먼저 입력해 주세요.")
