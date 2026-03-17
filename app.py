@@ -1,11 +1,3 @@
-아하, 실수가 있었네요! 제가 설명드린 **설명 텍스트(한글 내용)**까지 실수로 코드 파일(app.py)에 같이 붙여넣으신 것 같습니다.
-
-파이썬 코드 파일에는 오직 컴퓨터가 읽을 수 있는 코드만 들어가야 합니다. SyntaxError는 컴퓨터가 "이 이모티콘과 한글은 어떻게 읽어야 할지 모르겠어!"라고 외치는 비명이에요.
-
-GitHub의 app.py 내용을 전부 지우고, 아래의 깨끗한 코드만 복사해서 다시 붙여넣어 보세요.
-
-💻 app.py 전용 코드 (오류 수정 버전)
-Python
 import streamlit as st
 import pandas as pd
 import requests
