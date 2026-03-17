@@ -7,7 +7,7 @@ def get_naver_product_data(url):
     """네이버 스마트스토어의 숨겨진 JSON 데이터 API를 직접 호출"""
     try:
         # 1. URL에서 상품 번호(Product ID) 추출
-        product_id_match = re.search(r'/products/(\count_digits\d+)', url)
+        product_id_match = re.search(r'products/(\d+)', url)
         if not product_id_match:
             # 11730189206 같은 형태가 아닐 경우 대비
             product_id_match = re.search(r'products/(\d+)', url)
