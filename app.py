@@ -1,76 +1,71 @@
 import streamlit as st
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
+import requests
 from bs4 import BeautifulSoup
-import time
+import re
 
-def get_driver():
-    """브라우저 설정 (차단 방지 옵션 포함)"""
-    options = Options()
-    options.add_argument("--headless") # 화면 없이 실행
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+def scrape_ant_engine(target_url):
+    """ScraperAnt 엔진을 사용하여 차단을 우회하고 정보를 수집합니다."""
+    api_key = st.secrets["ANT_API_KEY"]
+    # ScraperAnt API 호출 주소
+    api_url = f"https://api.scraperant.com/v2/general?url={target_url}&x-api-key={api_key}&browser=true"
     
-    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
-def scrape_with_browser(url):
-    driver = get_driver()
     try:
-        driver.get(url)
-        time.sleep(3) # 페이지 로딩 대기
+        res = requests.get(api_url, timeout=20)
+        if res.status_code != 200:
+            return {"title": f"수집 실패 (Error {res.status_code})", "price": "0", "img_url": ""}
         
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        soup = BeautifulSoup(res.text, "html.parser")
         
-        # 1. 제목 추출 (다양한 쇼핑몰 공통 메타데이터 활용)
-        title = "정보 없음"
-        title_tag = soup.find("meta", property="og:title")
-        if title_tag:
-            title = title_tag['content']
+        # 1. 제목 추출 (최적화)
+        title = "제목 없음"
+        og_title = soup.find("meta", property="og:title")
+        if og_title:
+            title = og_title['content']
         else:
             title = soup.title.string if soup.title else "제목 없음"
-
-        # 2. 가격 추출 (숫자 패턴 찾기)
-        import re
-        page_text = soup.get_text()
-        # '원' 앞의 숫자나 가격처럼 보이는 패턴 추출
-        price_matches = re.findall(r'(\d{1,3}(?:,\d{3})+)', page_text)
-        price = price_matches[0].replace(",", "") if price_matches else "0"
+            
+        # 2. 가격 추출 (패턴 매칭)
+        price = "0"
+        # 쿠팡/네이버 등의 가격 태그들 공통 패턴
+        price_text = soup.get_text()
+        price_match = re.search(r'(\d{1,3}(?:,\d{3})+)', price_text)
+        if price_match:
+            price = price_match.group(1).replace(",", "")
 
         # 3. 이미지 추출
         img_url = ""
-        img_tag = soup.find("meta", property="og:image")
-        if img_tag:
-            img_url = img_tag['content']
+        og_img = soup.find("meta", property="og:image")
+        if og_img:
+            img_url = og_img['content']
 
         return {"title": title, "price": price, "img_url": img_url}
     except Exception as e:
-        return {"title": f"수집 실패: {str(e)}", "price": "0", "img_url": ""}
-    finally:
-        driver.quit()
+        return {"title": f"연결 오류: {str(e)}", "price": "0", "img_url": ""}
 
 # --- UI ---
-st.set_page_config(page_title="Universal Crawler", layout="wide")
-st.title("🌐 무제한 URL 정보 수집기 (No AI)")
+st.set_page_config(page_title="Ultimate Sourcing Tool", layout="wide")
+st.title("🛡️ 차단 없는 무제한 수집기")
 
-url_input = st.text_input("수집할 상품 URL을 입력하세요 (쿠팡, 네이버, 다이소 등)")
+st.info("ScraperAnt 엔진을 사용하여 쿠팡, 네이버, 다이소몰을 뚫습니다.")
+url_input = st.text_input("수집할 상품 URL을 입력하세요")
 
-if st.button("강력 수집 시작"):
+if st.button("🚀 강력 수집 시작"):
     if url_input:
-        with st.spinner("브라우저를 실행하여 정보를 읽어오는 중..."):
-            data = scrape_with_browser(url_input)
+        with st.spinner("전문 엔진이 차단을 우회하여 정보를 가져오는 중..."):
+            data = scrape_ant_engine(url_input)
             
-            if "http" in data['img_url']:
-                st.image(data['img_url'], width=300)
-            
-            st.subheader("📋 수집 데이터")
-            st.write(f"**상품명:** {data['title']}")
-            st.write(f"**가격:** {data['price']}원")
-            
-            st.success("AI 한도 소모 없이 수집에 성공했습니다!")
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                if data['img_url']:
+                    st.image(data['img_url'], use_container_width=True)
+            with col2:
+                st.subheader("✅ 수집 결과")
+                st.write(f"**상품명:** {data['title']}")
+                st.write(f"**가격:** {data['price']}원")
+                
+                # 쇼피 가격 계산 (간단 예시)
+                sgd = round((int(data['price']) * 1.3) / 1000, 2)
+                st.metric("🇸🇬 쇼피 예상 판매가", f"${sgd} SGD")
     else:
-        st.warning("URL을 입력해 주세요.")
+        st.warning("URL을 입력해주세요.")
