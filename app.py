@@ -1,81 +1,76 @@
 import streamlit as st
-import pandas as pd
-from googlesearch import search
+import requests
 import re
+import json
 
-# 페이지 설정
-st.set_page_config(page_title="Shopee Sourcing Master", layout="wide")
-
-def scrape_via_google(url):
-    """쇼핑몰 직접 접속 대신 구글 검색 데이터를 활용"""
+def get_naver_product_data(url):
+    """네이버 스마트스토어의 숨겨진 JSON 데이터 API를 직접 호출"""
     try:
-        # 구글에서 해당 URL을 검색 (최상단 결과 1개만 가져옴)
-        query = f"info:{url}"
-        results = list(search(query, num_results=1, advanced=True))
-        
-        if results:
-            res = results[0]
-            # 구글 검색 결과의 제목 (쇼핑몰이 설정한 상품명)
-            title = res.title.split(":")[0].replace(" - 네이버 스마트스토어", "").strip()
+        # 1. URL에서 상품 번호(Product ID) 추출
+        product_id_match = re.search(r'/products/(\count_digits\d+)', url)
+        if not product_id_match:
+            # 11730189206 같은 형태가 아닐 경우 대비
+            product_id_match = re.search(r'products/(\d+)', url)
             
-            # 설명글(Snippet)에서 가격 패턴(숫자+원) 추출 시도
-            description = res.description
-            price = "0"
-            price_match = re.search(r'([\d,]+)원', description)
-            if price_match:
-                price = price_match.group(1).replace(",", "")
+        if not product_id_match:
+            return {"error": "상품 번호를 찾을 수 없는 URL입니다."}
+            
+        product_id = product_id_match.group(1)
+        
+        # 2. 네이버 내부 API 주소로 직접 요청 (F12에서 확인되는 그 주소)
+        api_url = f"https://smartstore.naver.com/i/v1/contents/pc/products/{product_id}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        
+        response = requests.get(api_url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # F12에서 보셨던 데이터 구조대로 파싱
+            product_name = data.get('base', {}).get('name', "제목 없음")
+            sale_price = data.get('base', {}).get('salePrice', 0)
+            rep_image = data.get('base', {}).get('representativeImageUrl', "")
             
             return {
-                "title": title,
-                "price": price,
-                "description": description
+                "title": product_name,
+                "price": sale_price,
+                "img_url": rep_image
             }
         else:
-            return None
-    except Exception as e:
-        st.error(f"우회 시도 중 오류: {e}")
-        return None
-
-# --- UI 레이아웃 ---
-st.title("🛡️ Shopee Sourcing (Google Cache Mode)")
-st.info("쇼핑몰의 직접 차단을 피해 구글 검색 엔진 데이터로 정보를 읽어옵니다.")
-
-url_input = st.text_input("수집할 상품 URL을 입력하세요 (네이버, 쿠팡, 다이소 등)")
-
-if st.button("🚀 데이터 수집 시작"):
-    if url_input:
-        with st.spinner("구글 서버에서 정보를 안전하게 가져오는 중..."):
-            data = scrape_via_google(url_input)
+            return {"error": f"네이버 API 응답 에러 ({response.status_code})"}
             
-            if data:
-                st.success("정보 수집 성공!")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.subheader("✅ 수집 결과")
-                    final_title = st.text_input("수정된 상품명", data['title'])
-                    
-                    # 가격이 0으로 나올 경우 직접 입력 유도
-                    current_price = int(data['price']) if data['price'].isdigit() else 0
-                    final_price = st.number_input("한국 원가(KRW)", value=current_price, step=1000)
-                
-                with col2:
-                    st.subheader("🇸🇬 쇼피 판매가 계산")
-                    # 마진 35% + 환율 1000원 가정 (필요시 수정 가능)
-                    sgd_price = round((final_price * 1.35) / 1000, 2)
-                    st.metric("권장 판매가", f"${sgd_price} SGD")
-                    
-                # 엑셀 저장용 데이터 구성
-                st.divider()
-                st.subheader("📊 엑셀 등록용 데이터 미리보기")
-                res_df = pd.DataFrame([{
-                    "Original Title": data['title'],
-                    "Price (KRW)": final_price,
-                    "Price (SGD)": sgd_price,
-                    "URL": url_input
-                }])
-                st.table(res_df)
+    except Exception as e:
+        return {"error": f"수집 중 오류 발생: {str(e)}"}
+
+# --- UI ---
+st.set_page_config(page_title="Naver Specialist", layout="wide")
+st.title("🎯 네이버 스마트스토어 전용 정밀 수집기")
+st.markdown("F12 개발자 도구에 나타나는 **실제 원본 데이터**를 직접 추출합니다.")
+
+target_url = st.text_input("네이버 스마트스토어 주소를 입력하세요")
+
+if st.button("데이터 정밀 추출"):
+    if target_url:
+        with st.spinner("비밀 API 통로로 데이터 가져오는 중..."):
+            result = get_naver_product_data(target_url)
+            
+            if "error" in result:
+                st.error(result["error"])
             else:
-                st.error("구글 검색 결과에서 정보를 찾지 못했습니다. URL이 정확한지 확인해 주세요.")
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    if result["img_url"]:
+                        st.image(result["img_url"], use_container_width=True)
+                with col2:
+                    st.success("데이터 추출 성공!")
+                    st.subheader(f"📦 {result['title']}")
+                    st.write(f"**실제 판매가:** {result['price']:,}원")
+                    
+                    # 쇼피 계산기
+                    sgd = round((result['price'] * 1.35) / 1000, 2)
+                    st.metric("🇸🇬 쇼피 예상가", f"${sgd} SGD")
     else:
-        st.warning("URL을 먼저 입력해 주세요.")
+        st.warning("URL을 입력해주세요.")
