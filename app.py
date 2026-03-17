@@ -1,23 +1,21 @@
 import streamlit as st
-import pandas as pd
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 import re
 
-def scrape_ant_engine(target_url):
-    """ScraperAnt 엔진을 사용하여 차단을 우회하고 정보를 수집합니다."""
-    api_key = st.secrets["ANT_API_KEY"]
-    # ScraperAnt API 호출 주소
-    api_url = f"https://api.scraperant.com/v2/general?url={target_url}&x-api-key={api_key}&browser=true"
-    
+def scrape_fast(url):
+    """차단 방지 레이어를 입힌 초간단 수집기"""
     try:
-        res = requests.get(api_url, timeout=20)
+        # 브라우저처럼 보이게 해주는 스크래퍼 생성
+        scraper = cloudscraper.create_scraper()
+        res = scraper.get(url, timeout=10)
+        
         if res.status_code != 200:
-            return {"title": f"수집 실패 (Error {res.status_code})", "price": "0", "img_url": ""}
+            return {"title": f"접속 실패 ({res.status_code})", "price": "0", "img_url": ""}
         
         soup = BeautifulSoup(res.text, "html.parser")
         
-        # 1. 제목 추출 (최적화)
+        # 1. 제목 (og:title 최우선)
         title = "제목 없음"
         og_title = soup.find("meta", property="og:title")
         if og_title:
@@ -25,15 +23,13 @@ def scrape_ant_engine(target_url):
         else:
             title = soup.title.string if soup.title else "제목 없음"
             
-        # 2. 가격 추출 (패턴 매칭)
+        # 2. 가격 (숫자 패턴)
         price = "0"
-        # 쿠팡/네이버 등의 가격 태그들 공통 패턴
-        price_text = soup.get_text()
-        price_match = re.search(r'(\d{1,3}(?:,\d{3})+)', price_text)
+        price_match = re.search(r'(\d{1,3}(?:,\d{3})+)', res.text)
         if price_match:
             price = price_match.group(1).replace(",", "")
 
-        # 3. 이미지 추출
+        # 3. 이미지
         img_url = ""
         og_img = soup.find("meta", property="og:image")
         if og_img:
@@ -41,31 +37,31 @@ def scrape_ant_engine(target_url):
 
         return {"title": title, "price": price, "img_url": img_url}
     except Exception as e:
-        return {"title": f"연결 오류: {str(e)}", "price": "0", "img_url": ""}
+        return {"title": f"오류 발생: {str(e)}", "price": "0", "img_url": ""}
 
 # --- UI ---
-st.set_page_config(page_title="Ultimate Sourcing Tool", layout="wide")
-st.title("🛡️ 차단 없는 무제한 수집기")
+st.set_page_config(page_title="Shopee Sourcing", layout="wide")
+st.title("🛡️ 3초 완성 상품 수집기")
 
-st.info("ScraperAnt 엔진을 사용하여 쿠팡, 네이버, 다이소몰을 뚫습니다.")
-url_input = st.text_input("수집할 상품 URL을 입력하세요")
+url_input = st.text_input("수집할 상품 URL (네이버, 쿠팡 등)")
 
-if st.button("🚀 강력 수집 시작"):
+if st.button("🚀 정보 가져오기"):
     if url_input:
-        with st.spinner("전문 엔진이 차단을 우회하여 정보를 가져오는 중..."):
-            data = scrape_ant_engine(url_input)
+        with st.spinner("정보를 읽어오는 중입니다..."):
+            data = scrape_fast(url_input)
             
             col1, col2 = st.columns([1, 2])
             with col1:
-                if data['img_url']:
+                if data['img_url'] and "http" in data['img_url']:
                     st.image(data['img_url'], use_container_width=True)
             with col2:
                 st.subheader("✅ 수집 결과")
                 st.write(f"**상품명:** {data['title']}")
-                st.write(f"**가격:** {data['price']}원")
+                st.write(f"**한국 원가:** {data['price']}원")
                 
-                # 쇼피 가격 계산 (간단 예시)
-                sgd = round((int(data['price']) * 1.3) / 1000, 2)
-                st.metric("🇸🇬 쇼피 예상 판매가", f"${sgd} SGD")
+                # 쇼피 싱가포르 가격 (마진 30%, 환율 1000원 기준)
+                if data['price'].isdigit():
+                    sgd = round((int(data['price']) * 1.3) / 1000, 2)
+                    st.metric("🇸🇬 쇼피 예상 판매가", f"${sgd} SGD")
     else:
-        st.warning("URL을 입력해주세요.")
+        st.warning("URL을 입력해 주세요.")
