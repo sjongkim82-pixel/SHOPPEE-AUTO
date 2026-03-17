@@ -6,7 +6,7 @@ import google.generativeai as genai
 import re
 
 # Gemini 설정
-genai.configure(api_key=st.secrets["AIzaSyAWmQSl0WT9nLEwPfo2-ft0vXhCyQKfRP0"])
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_product_info_ai(url):
