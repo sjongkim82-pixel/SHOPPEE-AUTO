@@ -1,62 +1,69 @@
 import streamlit as st
-import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 import google.generativeai as genai
-import re
+import pandas as pd
 
 # Gemini 설정
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-2.0-flash')
+try:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    model = genai.GenerativeModel('gemini-2.0-flash')
+except:
+    st.error("API 키 설정이 필요합니다. Settings > Secrets를 확인하세요.")
 
-def get_product_info_ai(url):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        # 페이지에서 텍스트와 이미지 태그만 추출해서 AI에게 전달
-        page_content = soup.get_text()[:3000] # 너무 길면 잘림
-        img_tags = [img['src'] for img in soup.find_all('img', src=True) if 'product' in img['src'] or 'goods' in img['src']][:5]
-        
-        prompt = f"""
-        아래는 어느 쇼핑몰의 상품 페이지 내용이야. 
-        여기서 1.상품명, 2.정확한 판매가격(숫자만), 3.대표 상품 이미지 URL을 찾아서 
-        형식에 맞춰 대답해줘. 다른 말은 하지마.
-        
-        형식: 상품명|가격|이미지URL
-        내용: {page_content}
-        이미지후보: {img_tags}
-        """
-        
-        response = model.generate_content(prompt)
-        ai_res = response.text.strip().split('|')
-        
-        return {
-            "title": ai_res[0] if len(ai_res) > 0 else "실패",
-            "price": ai_res[1] if len(ai_res) > 1 else "0",
-            "img_url": ai_res[2] if len(ai_res) > 2 else ""
-        }
-    except Exception as e:
-        return {"title": f"에러: {str(e)}", "price": "0", "img_url": ""}
+st.set_page_config(page_title="Shopee Sourcing Tool", layout="wide")
+st.title("🚀 Shopee AI 상품 마스터")
 
-# --- UI ---
-st.title("🚀 AI 기반 쇼피 소싱 마스터")
+# --- UI 섹션 ---
+col1, col2 = st.columns([1, 1])
 
-url_input = st.text_input("상품 URL을 입력하세요 (다이소, 네이버 등)")
-
-if st.button("AI로 정보 긁어오기"):
-    if url_input:
-        with st.spinner("AI가 페이지 분석 중..."):
-            data = get_product_info_ai(url_input)
-            st.success("수집 완료!")
-            
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                if data['img_url']:
-                    st.image(data['img_url'], width=200)
-            with col2:
-                st.write(f"**상품명:** {data['title']}")
-                st.write(f"**가격:** {data['price']}원")
+with col1:
+    st.subheader("1. 정보 입력 (URL 또는 수동)")
+    method = st.radio("입력 방식 선택", ["직접 입력 (추천)", "URL 자동 수집 (네이버/다이소 전용)"])
+    
+    input_title = ""
+    input_price = 0
+    
+    if method == "직접 입력 (추천)":
+        input_title = st.text_input("상품명 입력", "신일 탁상용 선풍기")
+        input_price = st.number_input("한국 원가(KRW)", value=25000, step=1000)
     else:
-        st.warning("URL을 입력해주세요.")
+        st.warning("쿠팡은 차단 정책으로 인해 수동 입력을 권장합니다.")
+        url = st.text_input("상품 URL 입력")
+        st.info("URL 수집 기능은 구글 API 한도에 따라 작동이 멈출 수 있습니다.")
+
+with col2:
+    st.subheader("2. 쇼피용 최적화 결과")
+    if st.button("✨ 쇼피용으로 변환하기"):
+        if input_title:
+            with st.spinner("AI가 상품명을 영어로 번역하고 최적화 중..."):
+                try:
+                    # AI에게 번역 및 키워드 추출 요청
+                    prompt = f"상품명 '{input_title}'을 쇼피 싱가포르 판매용 영어 제목으로 변환해줘. 브랜드명이 있다면 포함하고, 상품의 특징 키워드 3개를 조합해서 80자 이내로 만들어줘. 결과만 딱 한 줄로 말해."
+                    response = model.generate_content(prompt)
+                    eng_title = response.text.strip()
+                    
+                    # 쇼피 가격 계산기 (환율 1,000원 기준 / 마진 30%)
+                    # 식: (원가 * 마진배수) / 환율
+                    sgd_price = round((input_price * 1.35) / 1000, 2)
+                    
+                    st.success("변환 성공!")
+                    st.markdown(f"### 🇬🇧 영어 상품명\n`{eng_title}`")
+                    st.markdown(f"### 🇸🇬 권장 판매가\n`$ {sgd_price} SGD` (마진/수수료 포함)")
+                    
+                    # 엑셀 저장용 데이터 준비
+                    st.session_state['final_data'] = {
+                        "Original": input_title,
+                        "English": eng_title,
+                        "Price_KRW": input_price,
+                        "Price_SGD": sgd_price
+                    }
+                except Exception as e:
+                    st.error(f"API 한도 초과 또는 오류: 1분 뒤에 다시 시도해주세요. ({str(e)})")
+        else:
+            st.warning("상품명을 입력해주세요.")
+
+# --- 하단 미리보기 ---
+if 'final_data' in st.session_state:
+    st.divider()
+    st.subheader("📊 엑셀 등록용 데이터 미리보기")
+    df = pd.DataFrame([st.session_state['final_data']])
+    st.table(df)
