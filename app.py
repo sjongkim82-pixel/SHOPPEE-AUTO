@@ -1,64 +1,75 @@
 import streamlit as st
 import requests
-import re
+from bs4 import BeautifulSoup
 import time
 
-def get_naver_product_data_stealth(url):
-    """네이버의 차단을 피하기 위해 더 정교하게 위장하여 호출"""
-    product_id_match = re.search(r'products/(\d+)', url)
-    if not product_id_match:
-        return {"error": "네이버 상품 번호를 찾을 수 없습니다."}
-    
-    p_id = product_id_match.group(1)
-    api_url = f"https://smartstore.naver.com/i/v1/contents/pc/products/{p_id}"
-    
-    # 실제 사람이 크롬 브라우저를 쓰는 것처럼 속이는 '위장막'
+def scrape_naver_by_f12(url):
+    """F12에서 확인된 클래스명을 직접 타격하여 수집"""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": url, # 어디서 왔는지 알려줌 (중요!)
-        "Cache-Control": "no-cache"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8"
     }
     
     try:
-        # 네이버가 의심하지 않게 1초 정도 쉬었다가 요청 (매너)
-        time.sleep(1)
-        res = requests.get(api_url, headers=headers, timeout=10)
+        # 네이버 차단 방지를 위한 세션 생성
+        session = requests.Session()
+        res = session.get(url, headers=headers, timeout=10)
         
-        if res.status_code == 200:
-            data = res.json()
-            base = data.get('base', {})
-            return {
-                "title": base.get('name'),
-                "price": base.get('salePrice'),
-                "img": base.get('representativeImageUrl')
-            }
-        elif res.status_code == 429:
-            return {"error": "네이버가 잠시 문을 닫았습니다(429). 1~2분 뒤에 다시 시도하거나, 주소창의 URL을 다시 확인해주세요."}
-        else:
-            return {"error": f"네이버 응답 에러: {res.status_code}"}
+        if res.status_code != 200:
+            return {"error": f"접속 실패 (에러코드: {res.status_code})"}
             
+        soup = BeautifulSoup(res.text, "html.parser")
+        
+        # 1. 상품명 추출 (F12에서 본 h3 태그의 클래스 사용)
+        # 클래스명이 바뀔 수 있으므로 여러 후보를 넣었습니다.
+        title = "제목 없음"
+        title_tag = soup.select_one("h3.DCVBeA8ZB") # 스크린샷 속 바로 그 클래스
+        if not title_tag:
+            title_tag = soup.select_one("h3._copyable") # 대체 클래스
+        
+        if title_tag:
+            title = title_tag.get_text().strip()
+
+        # 2. 가격 추출 (스크린샷 속 span 클래스 e1DMQNBPJ_)
+        price = "0"
+        price_tag = soup.select_one("span.e1DMQNBPJ_")
+        if not price_tag:
+            # 가격 정보가 숨겨진 다른 위치 탐색
+            price_tag = soup.find("span", string=lambda x: x and "199,000" in x) 
+        
+        if price_tag:
+            price = price_tag.get_text().replace(",", "").strip()
+
+        return {
+            "title": title,
+            "price": price
+        }
+        
     except Exception as e:
-        return {"error": f"연결 실패: {str(e)}"}
+        return {"error": f"수집 실패: {str(e)}"}
 
 # --- UI ---
-st.title("🎯 네이버 차단 우회 수집기")
-url_input = st.text_input("네이버 스마트스토어 URL 입력")
+st.title("🎯 F12 정밀 타격 수집기")
+st.info("스크린샷의 HTML 구조를 분석하여 데이터를 추출합니다.")
 
-if st.button("데이터 추출 시작"):
+url_input = st.text_input("수집할 네이버 상품 URL")
+
+if st.button("데이터 뽑아오기"):
     if url_input:
-        with st.spinner("네이버 보안망을 조심스럽게 통과 중..."):
-            result = get_naver_product_data_stealth(url_input)
+        with st.spinner("네이버 서버에서 정보를 찾는 중..."):
+            data = scrape_naver_by_f12(url_input)
             
-            if "error" in result:
-                st.error(result["error"])
-                st.info("💡 팁: 네이버는 너무 자주 요청하면 막힙니다. 잠시 쉬었다가 시도해 보세요!")
+            if "error" in data:
+                st.error(data["error"])
+                st.write("네이버가 일시적으로 IP를 차단했을 수 있습니다. 1분 뒤 다시 시도해 주세요.")
             else:
-                st.success("데이터 추출 성공!")
-                st.subheader(result["title"])
-                st.write(f"**수집 원가:** {result['price']:,}원")
+                st.success("정보 추출 성공!")
+                st.subheader(f"📦 상품명: {data['title']}")
+                st.write(f"**수집 원가:** {data['price']}원")
                 
-                # 쇼피 환율 계산
-                sgd = round((result['price'] * 1.35) / 1000, 2)
-                st.metric("🇸🇬 쇼피 권장 판매가", f"${sgd} SGD")
+                # 쇼피 계산 (환율 1,000원 기준)
+                if data['price'].isdigit():
+                    sgd = round((int(data['price']) * 1.35) / 1000, 2)
+                    st.metric("🇸🇬 쇼피 예상가", f"${sgd} SGD")
+    else:
+        st.warning("URL을 입력해 주세요.")
